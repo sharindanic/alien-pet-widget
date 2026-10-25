@@ -1,4 +1,4 @@
-# 👽 Alien Pet Widget
+# Alien Pet Widget
 
 A tiny pixel alien that lives on your iPhone home screen. Its mood follows your phone.
 
