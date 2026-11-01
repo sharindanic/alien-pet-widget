@@ -252,6 +252,7 @@ function addInfo(stack, state, mood, moodKey, weather) {
 }
 
 function buildWidget(state, moodKey, weather, family = config.widgetFamily) {
+  if (family && family.startsWith("accessory")) return buildLockWidget(state, moodKey, weather, family)
   const mood = MOODS[moodKey]
   const w = new ListWidget()
   const bg = new LinearGradient()
@@ -284,6 +285,60 @@ function buildWidget(state, moodKey, weather, family = config.widgetFamily) {
     addInfo(w, state, mood, moodKey, weather)
   }
   return w
+}
+
+function buildLockWidget(state, moodKey, weather, family) {
+  const w = new ListWidget()
+  w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000)
+  w.addAccessoryWidgetBackground = family !== "accessoryInline"
+  const runUrl = URLScheme.forRunningScript()
+  w.url = runUrl + (runUrl.includes("?") ? "&" : "?") + "action=pet"
+  const battery = Math.round(Device.batteryLevel() * 100)
+  if (family === "accessoryInline") {
+    w.addText(`👽 ${state.name} · ${battery}%`)
+    return w
+  }
+
+  const img = drawAlien(MOODS[moodKey], state, moodKey, weather)
+  if (family === "accessoryCircular") {
+    w.setPadding(1, 2, 1, 2)
+    const face = w.addImage(img)
+    face.imageSize = new Size(41, 36)
+    face.centerAlignImage()
+    const level = w.addText(`${battery}%`)
+    level.font = Font.boldRoundedSystemFont(10)
+    level.centerAlignText()
+  } else {
+    w.setPadding(2, 5, 2, 5)
+    const row = w.addStack()
+    row.centerAlignContent()
+    row.addImage(img).imageSize = new Size(46, 40)
+    row.addSpacer(4)
+    const details = row.addStack()
+    details.layoutVertically()
+    const name = details.addText(state.name)
+    name.font = Font.boldRoundedSystemFont(12)
+    const level = details.addText(`⚡ ${battery}% · ${moodKey}`)
+    level.font = Font.regularRoundedSystemFont(9)
+    level.lineLimit = 1
+    level.minimumScaleFactor = 0.7
+  }
+  return w
+}
+
+async function previewWidget(state, weather) {
+  const picker = new Alert()
+  picker.title = "Preview widget"
+  for (const label of ["Home Screen", "Lock Screen circle", "Lock Screen rectangle", "Lock Screen inline"]) picker.addAction(label)
+  picker.addCancelAction("Back")
+  const choice = await picker.presentSheet()
+  const family = ["medium", "accessoryCircular", "accessoryRectangular", "accessoryInline"][choice]
+  if (!family) return
+  const widget = buildWidget(state, getMood(state), weather, family)
+  if (family === "medium") await widget.presentMedium()
+  else if (family === "accessoryCircular") await widget.presentAccessoryCircular()
+  else if (family === "accessoryRectangular") await widget.presentAccessoryRectangular()
+  else await widget.presentAccessoryInline()
 }
 
 async function configureWeather(state) {
@@ -386,7 +441,7 @@ if (config.runsInWidget) {
   const weather = await currentWeather(state)
   saveState(state)
 
-  if (action === "preview") await buildWidget(state, getMood(state), weather, "medium").presentMedium()
+  if (action === "preview") await previewWidget(state, weather)
   else if (action) await buildWidget(state, getMood(state), weather, "small").presentSmall()
 }
 
