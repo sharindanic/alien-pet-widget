@@ -1,75 +1,22 @@
-# Journey: iPhone + Mac + Claude Code
+# Building Alien Pet
 
-Notes from one session (25 Oct 2026) of poking at an iPhone 11 Pro over a Lightning cable from a MacBook, using Claude Code. It started with a viral post ("this guy used Claude Code to scan his sister's iPhone for spyware") and ended with a pixel alien living on the home screen.
+Alien Pet began in October 2026 as a small pixel character for an iPhone Home Screen. [Scriptable](https://scriptable.app/) made it possible to build the widget in JavaScript without an Xcode project.
 
-## 1. Talking to the iPhone from the Mac
+## First version
 
-Tools: [libimobiledevice](https://libimobiledevice.org) (`brew install libimobiledevice ideviceinstaller`).
+The alien is drawn with `DrawContext` from a 16 × 14 character grid. Its eyes and mouth are placed on that grid according to its mood. Charging state, battery level, time of day, and petting determine which mood appears.
 
-| Command | What it does |
-|---|---|
-| `idevice_id -l` | Is the phone connected? |
-| `ideviceinfo` | Model, iOS version, serial, etc. |
-| `ideviceinstaller -l` | List every user-installed app |
-| `idevicesyslog` | Live system log stream |
-| `idevicediagnostics ioregentry AppleSmartBattery` | Real battery health (cycles, capacity) |
-| `ideviceprovision list` | Installed provisioning profiles |
-| `idevicecrashreport <dir>` | Pull (and clear) crash logs off the phone |
+The script keeps the pet's name, birthday, and recent actions in a local JSON file managed by `FileManager.local()`. Keeping the same Scriptable script name when updating the code preserves that state.
 
-Findings:
-- 22 user apps, nothing known-bad. Flagged a free VPN app as a privacy risk (all traffic goes through it).
-- Battery: 3,331 cycles, ~67% of design capacity: time for a replacement.
-- 2 minutes of syslog (~237k lines): only normal Apple system activity, nothing phoning home on a timer.
-- Cleared ~148 MB of crash logs.
+Two useful lessons from the first version:
 
-## 2. Spyware scan with MVT
+- Scriptable uses `Font.regularRoundedSystemFont`; `Font.roundedSystemFont` is not an available method.
+- `config.widgetFamily` is `null` during an in-app preview, so previews pass the intended size explicitly.
 
-[MVT (Mobile Verification Toolkit)](https://mvt.re) by Amnesty International, the tool used in the Pegasus investigations.
+## Growing the pet
 
-```bash
-brew install pipx && pipx install mvt
-mvt-ios download-iocs                     # 19 indicator lists, ~11.5k indicators
-# Finder → iPhone → "Encrypt local backup" → Back Up Now
-cd ~/Library/Application\ Support/MobileSync/Backup
-mvt-ios decrypt-backup -d ~/iphone-scan <UDID>      # asks for the backup password
-mvt-ios check-backup -o ~/iphone-scan-results ~/iphone-scan
-```
+The November 2026 update added three skins, a crown and bow, Feed snack and Play actions, and visible growth stages based on age and interactions. An optional weather setting uses an approximate saved location to fetch current conditions from Open-Meteo. The widget caches weather and can remove its saved location from the menu.
 
-Gotchas:
-- The backup folder is protected by macOS. The terminal needs **Full Disk Access**.
-- The backup password is the one set for "Encrypt local backup", not the phone passcode or Mac password.
-- Long commands copied from a wrapped terminal pick up line breaks. Put them in a small script and run `bash script.sh`.
-- The decrypted backup and the results contain messages, contacts, photos. Delete them when done.
+Home Screen widgets show their last draw time because iOS controls the actual refresh schedule. Circular, rectangular, and inline Lock Screen layouts share the same local pet state. A widget tap runs the script through Scriptable's URL scheme and records a Pet action.
 
-Result: **0 indicator matches.** 2 HIGH alerts were one deleted DataUsage record from April 2024 claiming ~2 TB of mobile data: almost certainly a corrupted leftover from an uninstalled app, not spyware. 296 LOW alerts were normal gaps from uninstalled apps. Main real-world advice: update iOS.
-
-## 3. Building the alien pet widget
-
-Wanted something small and shareable that lives *on* the phone. Went with [Scriptable](https://scriptable.app): JavaScript widgets, no Xcode.
-
-- Pixel sprite drawn with `DrawContext` from a 16×14 character grid; eyes and mouth stamped on per mood.
-- Mood comes from `Device.isCharging()`, `Device.batteryLevel()`, time of day and when you last petted it.
-- State (name, birthday, last fed/petted) saved as JSON via `FileManager.local()`.
-
-Getting it onto the phone:
-- AirDrop puts the `.js` in Files, not Scriptable. Move it into **Files → iCloud Drive → Scriptable** and it appears as a script.
-- First run failed: `Font.roundedSystemFont` doesn't exist. Scriptable's name is `Font.regularRoundedSystemFont`.
-
-Things learned:
-- iOS refreshes widgets on its own schedule (roughly every 15–60 min). Unplugging the charger doesn't instantly change the mood.
-- `config.widgetFamily` is undefined when previewing in-app, so pass the family explicitly for previews.
-- The AssistiveTouch button can't be re-skinned without a jailbreak. Its single-tap action *can* run a Shortcut, though.
-
-## 4. Expanding the pet (1 Nov 2026)
-
-The original alien grew into a customizable companion. The Scriptable menu now saves a color skin and accessory alongside the pet's name and birthday. Pet, Feed snack, and Play each leave a short-lived mood; the number of interactions and the pet's age unlock new pixel details at the Explorer and Captain stages.
-
-Optional weather uses an approximate location chosen in the app. The widget requests current conditions from Open-Meteo, caches successful results for an hour, and avoids repeated requests while offline. The location and cached weather can be removed from the menu. The Home Screen widget shows its last draw time because iOS, not the script, decides when the next refresh actually appears.
-
-Scriptable's accessory widget families made circular, rectangular, and inline Lock Screen versions possible on iOS 16 and later. The same pet state is shared across all layouts. A widget tap launches the script through Scriptable's URL scheme and records a Pet action.
-
-The feature work was added in separate commits, reviewed in [PR #1](https://github.com/sharindanic/alien-pet-widget/pull/1), and merged to `main`. Local checks exercise Home Screen and Lock Screen rendering paths, saved pet state, and weather behavior. The iPhone was not connected during this update, so the final visual and tap checks still need to be done on the device.
-
-## Still to explore
-
-- `iphone-checkup`: one command that runs section 1 and prints a report.
+The feature work was reviewed in [PR #1](https://github.com/sharindanic/alien-pet-widget/pull/1). A later [documentation update](https://github.com/sharindanic/alien-pet-widget/pull/2) added the illustrated sprite preview. The local test suite checks the main widget flows with Scriptable mocks; visual layout and tap behavior still need an iPhone check.
