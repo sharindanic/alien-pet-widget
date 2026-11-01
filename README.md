@@ -44,9 +44,17 @@ Tapping the widget opens Scriptable, pets your alien, and shows a preview. Open 
 
 ## Optional weather
 
-Open the script and choose **Weather** to enable local weather reactions. Allow Scriptable to access your location when iOS asks. The script saves coordinates rounded to two decimal places (roughly 1 km), and sends them to [Open-Meteo](https://open-meteo.com/) for current conditions. It caches successful data for an hour and limits failed requests to one attempt per hour. Choose **Weather → Turn off weather** to delete the saved coordinates and weather data.
+Open the script and choose **Weather** to enable local weather reactions. The script first explains where your approximate location will be sent; iOS then asks whether Scriptable may access it. The script saves coordinates rounded to two decimal places (roughly 1 km), and sends them to [Open-Meteo](https://open-meteo.com/) for current conditions. It caches successful data for an hour and limits failed requests to one attempt per hour. Choose **Weather → Turn off weather** to delete the saved coordinates and weather data.
 
 Weather data: [Open-Meteo](https://open-meteo.com/), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Its free API is for non-commercial use.
+
+## Security and privacy
+
+This script reads battery and charging status, uses the current time, and saves your pet's name, interaction times, and settings in Scriptable's local storage. It does not read contacts, photos, messages, or passwords, and it does not download or run remote code. The weather request to Open-Meteo is its only network call, and weather is off until you choose to enable it.
+
+When weather is on, the rounded coordinates are sent to Open-Meteo over HTTPS. [Open-Meteo says](https://open-meteo.com/en/terms) its request logs may contain coordinates and are deleted after 90 days. iOS grants location access to Scriptable as an app, so other scripts you choose to run in Scriptable can use that permission too. Turning weather off removes the saved coordinates from this script; to revoke Scriptable's iOS location permission too, use **Settings → Privacy & Security → Location Services → Scriptable**.
+
+Widget taps open this script through a Scriptable link. A link can trigger the **Pet** action, which only changes the pet's local interaction state. Feed, Play, renaming, customization, and weather settings require the in-app menu. Review the source before installing or updating any Scriptable script, since Scriptable executes the JavaScript you paste into it.
 
 ## Lock Screen
 
@@ -60,8 +68,16 @@ Open [alien-pet.js](alien-pet.js) on your iPhone and copy the full source. In Sc
 
 Run `node --test tests/widget.test.js` to check the script's Home Screen, Lock Screen, petting, and weather flows without an iPhone. Regenerate the feature illustration with `node scripts/render-doc-preview.js`. These checks use a Scriptable mock; final layout and tap behavior still need a test on an iPhone.
 
-## License
+## MIT License
 
-MIT. See [LICENSE](LICENSE).
+Copyright (c) 2026 sharindanic
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+See [LICENSE](LICENSE) for the standalone license file.
 
 How this was built: [JOURNEY.md](JOURNEY.md)
