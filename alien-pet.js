@@ -36,6 +36,20 @@ const MOODS = {
   sleeping: { eyes: "closed", mouth: "flat",  body: "#4E9E68", glow: "#7A86FF", line: "zzz… 💤" },
 }
 
+const SKINS = {
+  classic: { name: "Classic green", body: "#7CE35A", dark: "#4E9E68", background: ["#0E1A12", "#16301E"] },
+  pink: { name: "Nebula pink", body: "#F48DC4", dark: "#A96591", background: ["#271327", "#482344"] },
+  blue: { name: "Moon blue", body: "#76C8F5", dark: "#527DAA", background: ["#101D32", "#1A3856"] },
+}
+const ACCESSORIES = { none: "None", crown: "Crown", bow: "Bow" }
+
+function skinFor(state) { return SKINS[state.skin] || SKINS.classic }
+
+function bodyColor(state, moodKey) {
+  const skin = skinFor(state)
+  return moodKey === "sleeping" || moodKey === "tired" ? skin.dark : skin.body
+}
+
 function getMood(state) {
   const hour = new Date().getHours()
   if (Device.isCharging()) return "eating"
@@ -82,7 +96,7 @@ const MOUTHS = {
   flat:  ["GGGGGG", "GGDDGG"],
 }
 
-function drawAlien(mood) {
+function drawAlien(mood, state, moodKey) {
   const grid = BODY.map(row => row.split(""))
   const eyes = EYES[mood.eyes]
   const mouth = MOUTHS[mood.mouth]
@@ -97,10 +111,15 @@ function drawAlien(mood) {
     grid[8][3] = "P"
     grid[8][12] = "P"
   }
+  if (state.accessory === "crown") {
+    for (const [x, y] of [[6, 1], [8, 0], [10, 1], [6, 2], [7, 2], [8, 2], [9, 2], [10, 2]]) grid[y][x] = "T"
+  } else if (state.accessory === "bow") {
+    for (const [x, y] of [[1, 3], [2, 4], [1, 5], [3, 4], [5, 3], [4, 4], [5, 5]]) grid[y][x] = "T"
+  }
 
   const palette = {
-    D: "#173B22", G: mood.body, A: mood.glow,
-    W: "#FFFFFF", K: "#101010", R: "#E8505B", P: "#FF8FAB",
+    D: "#173B22", G: bodyColor(state, moodKey), A: mood.glow,
+    W: "#FFFFFF", K: "#101010", R: "#E8505B", P: "#FF8FAB", T: "#FFE066",
   }
   const ctx = new DrawContext()
   ctx.size = new Size(16 * SCALE, BODY.length * SCALE)
@@ -134,7 +153,7 @@ function drawEnergyBar(level, color) {
 
 // ---------- widget ----------
 
-function addInfo(stack, state, mood) {
+function addInfo(stack, state, mood, moodKey) {
   const battery = Math.round(Device.batteryLevel() * 100)
   const days = Math.floor((Date.now() - state.born) / (24 * HOUR)) + 1
 
@@ -149,7 +168,7 @@ function addInfo(stack, state, mood) {
   line.minimumScaleFactor = 0.7
 
   stack.addSpacer(4)
-  const bar = stack.addImage(drawEnergyBar(battery / 100, mood.body))
+  const bar = stack.addImage(drawEnergyBar(battery / 100, bodyColor(state, moodKey)))
   bar.imageSize = new Size(100, 6)
   stack.addSpacer(3)
 
@@ -162,15 +181,16 @@ function buildWidget(state, moodKey, family = config.widgetFamily) {
   const mood = MOODS[moodKey]
   const w = new ListWidget()
   const bg = new LinearGradient()
+  const skin = skinFor(state)
   bg.colors = moodKey === "sleeping"
     ? [new Color("#0B1030"), new Color("#1C1F4A")]
-    : [new Color("#0E1A12"), new Color("#16301E")]
+    : skin.background.map(color => new Color(color))
   bg.locations = [0, 1]
   w.backgroundGradient = bg
   w.setPadding(10, 12, 10, 12)
   w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000)
 
-  const img = drawAlien(mood)
+  const img = drawAlien(mood, state, moodKey)
   if (family === "medium") {
     const row = w.addStack()
     row.centerAlignContent()
@@ -178,16 +198,34 @@ function buildWidget(state, moodKey, family = config.widgetFamily) {
     row.addSpacer(14)
     const col = row.addStack()
     col.layoutVertically()
-    addInfo(col, state, mood)
+    addInfo(col, state, mood, moodKey)
   } else {
     const top = w.addStack()
     top.addSpacer()
     top.addImage(img).imageSize = new Size(72, 63)
     top.addSpacer()
     w.addSpacer(4)
-    addInfo(w, state, mood)
+    addInfo(w, state, mood, moodKey)
   }
   return w
+}
+
+async function customize(state) {
+  const menu = new Alert()
+  menu.title = "Customize your alien"
+  menu.addAction("Change color")
+  menu.addAction("Change accessory")
+  menu.addCancelAction("Back")
+  const choice = await menu.presentSheet()
+  if (choice < 0) return
+  const picker = new Alert()
+  picker.title = choice === 0 ? "Alien color" : "Accessory"
+  const options = choice === 0 ? SKINS : ACCESSORIES
+  const keys = Object.keys(options)
+  for (const key of keys) picker.addAction(choice === 0 ? options[key].name : options[key])
+  picker.addCancelAction("Cancel")
+  const selected = await picker.presentSheet()
+  if (selected >= 0) state[choice === 0 ? "skin" : "accessory"] = keys[selected]
 }
 
 // ---------- main ----------
@@ -204,6 +242,7 @@ if (config.runsInWidget) {
   menu.message = "What do you want to do?"
   menu.addAction("Pet")
   menu.addAction("Rename")
+  menu.addAction("Customize")
   menu.addAction("Preview widget")
   menu.addCancelAction("Close")
   const choice = await menu.presentSheet()
@@ -221,9 +260,10 @@ if (config.runsInWidget) {
       if (name) state.name = name.slice(0, 12)
     }
   }
+  if (choice === 2) await customize(state)
   saveState(state)
 
-  if (choice === 2) await buildWidget(state, getMood(state), "medium").presentMedium()
+  if (choice === 3) await buildWidget(state, getMood(state), "medium").presentMedium()
   else if (choice !== -1) await buildWidget(state, getMood(state)).presentSmall()
 }
 
