@@ -60,8 +60,16 @@ Things learned:
 - `config.widgetFamily` is undefined when previewing in-app, so pass the family explicitly for previews.
 - The AssistiveTouch button can't be re-skinned without a jailbreak. Its single-tap action *can* run a Shortcut, though.
 
-## Ideas for next
+## 4. Expanding the pet (1 Nov 2026)
 
-- "updated HH:MM" stamp on the widget so stale moods are obvious
-- Lock screen widget version
-- `iphone-checkup`: one command that runs section 1 and prints a report
+The original alien grew into a customizable companion. The Scriptable menu now saves a color skin and accessory alongside the pet's name and birthday. Pet, Feed snack, and Play each leave a short-lived mood; the number of interactions and the pet's age unlock new pixel details at the Explorer and Captain stages.
+
+Optional weather uses an approximate location chosen in the app. The widget requests current conditions from Open-Meteo, caches successful results for an hour, and avoids repeated requests while offline. The location and cached weather can be removed from the menu. The Home Screen widget shows its last draw time because iOS, not the script, decides when the next refresh actually appears.
+
+Scriptable's accessory widget families made circular, rectangular, and inline Lock Screen versions possible on iOS 16 and later. The same pet state is shared across all layouts. A widget tap launches the script through Scriptable's URL scheme and records a Pet action.
+
+The feature work was added in separate commits, reviewed in [PR #1](https://github.com/sharindanic/alien-pet-widget/pull/1), and merged to `main`. Local checks exercise Home Screen and Lock Screen rendering paths, saved pet state, and weather behavior. The iPhone was not connected during this update, so the final visual and tap checks still need to be done on the device.
+
+## Still to explore
+
+- `iphone-checkup`: one command that runs section 1 and prints a report.
