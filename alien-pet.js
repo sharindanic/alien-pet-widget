@@ -74,6 +74,10 @@ async function currentWeather(state) {
   if (!state.weatherEnabled || !state.weatherLocation) return null
   const cached = state.weather
   if (cached && Date.now() - cached.updated < HOUR) return cached
+  if (state.weatherAttempted && Date.now() - state.weatherAttempted < HOUR) {
+    return cached && Date.now() - cached.updated < 3 * HOUR ? cached : null
+  }
+  state.weatherAttempted = Date.now()
   const location = state.weatherLocation
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=weather_code,is_day&forecast_days=1`
   try {
@@ -354,6 +358,7 @@ async function configureWeather(state) {
       state.weatherEnabled = false
       delete state.weatherLocation
       delete state.weather
+      delete state.weatherAttempted
       return
     }
     if (choice !== 0) return
@@ -367,6 +372,7 @@ async function configureWeather(state) {
     }
     state.weatherEnabled = true
     delete state.weather
+    delete state.weatherAttempted
   } catch (error) {
     const alert = new Alert()
     alert.title = "Location unavailable"

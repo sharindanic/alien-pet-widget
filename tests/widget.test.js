@@ -18,7 +18,7 @@ function node() {
   }
 }
 
-function environment(saved, { family = "small", inWidget = true, query = {}, choices = [] } = {}) {
+function environment(saved, { family = "small", inWidget = true, query = {}, choices = [], requestFails = false } = {}) {
   const output = { saved, widget: null, requests: 0 }
   const fileManager = {
     documentsDirectory: () => "/docs",
@@ -44,7 +44,11 @@ function environment(saved, { family = "small", inWidget = true, query = {}, cho
   }
   class Request {
     constructor(url) { output.url = url }
-    async loadJSON() { output.requests++; return { current: { weather_code: 61, is_day: 1 } } }
+    async loadJSON() {
+      output.requests++
+      if (requestFails) throw new Error("offline")
+      return { current: { weather_code: 61, is_day: 1 } }
+    }
   }
   const Font = Object.fromEntries(["boldRoundedSystemFont", "regularRoundedSystemFont", "mediumRoundedSystemFont"].map(key => [key, () => key]))
   const globals = {
@@ -119,4 +123,15 @@ test("turning weather off removes the saved location and weather", async () => {
   assert.equal(env.saved.weatherEnabled, false)
   assert.equal(env.saved.weatherLocation, undefined)
   assert.equal(env.saved.weather, undefined)
+})
+
+test("failed weather requests do not repeat during the one hour retry window", async () => {
+  const saved = { name: "Nova", born: Date.now(), lastFed: Date.now(), lastPet: 0,
+    weatherEnabled: true, weatherLocation: { latitude: 6.93, longitude: 79.86 } }
+  const first = environment(saved, { requestFails: true })
+  await first.run()
+  assert.equal(first.requests, 1)
+  const second = environment(first.saved, { requestFails: true })
+  await second.run()
+  assert.equal(second.requests, 0)
 })
