@@ -243,6 +243,12 @@ function addInfo(stack, state, mood, moodKey, weather) {
   meta.textColor = new Color("#8FB79A")
   meta.lineLimit = 1
   meta.minimumScaleFactor = 0.7
+
+  const now = new Date()
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
+  const updated = stack.addText(`updated ${time}`)
+  updated.font = Font.regularRoundedSystemFont(8)
+  updated.textColor = new Color("#70957B")
 }
 
 function buildWidget(state, moodKey, weather, family = config.widgetFamily) {
