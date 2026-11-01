@@ -52,6 +52,14 @@ function bodyColor(state, moodKey) {
   return moodKey === "sleeping" || moodKey === "tired" ? skin.dark : skin.body
 }
 
+function growthStage(state) {
+  const days = Math.floor((Date.now() - state.born) / (24 * HOUR)) + 1
+  const interactions = state.interactions || 0
+  if (days >= 14 && interactions >= 50) return "captain"
+  if (days >= 3 && interactions >= 10) return "explorer"
+  return "hatchling"
+}
+
 function getMood(state) {
   const hour = new Date().getHours()
   if (Device.isCharging()) return "eating"
@@ -115,6 +123,17 @@ function drawAlien(mood, state, moodKey) {
     grid[8][3] = "P"
     grid[8][12] = "P"
   }
+  const stage = growthStage(state)
+  if (stage === "explorer" || stage === "captain") {
+    grid[4][5] = "X"
+    grid[4][10] = "X"
+  }
+  if (stage === "captain") {
+    grid[5][4] = "X"
+    grid[5][11] = "X"
+    grid[0][0] = "A"
+    grid[1][1] = "A"
+  }
   if (state.accessory === "crown") {
     for (const [x, y] of [[6, 1], [8, 0], [10, 1], [6, 2], [7, 2], [8, 2], [9, 2], [10, 2]]) grid[y][x] = "T"
   } else if (state.accessory === "bow") {
@@ -123,7 +142,7 @@ function drawAlien(mood, state, moodKey) {
 
   const palette = {
     D: "#173B22", G: bodyColor(state, moodKey), A: mood.glow,
-    W: "#FFFFFF", K: "#101010", R: "#E8505B", P: "#FF8FAB", T: "#FFE066",
+    W: "#FFFFFF", K: "#101010", R: "#E8505B", P: "#FF8FAB", T: "#FFE066", X: "#FFF3B0",
   }
   const ctx = new DrawContext()
   ctx.size = new Size(16 * SCALE, BODY.length * SCALE)
@@ -176,9 +195,11 @@ function addInfo(stack, state, mood, moodKey) {
   bar.imageSize = new Size(100, 6)
   stack.addSpacer(3)
 
-  const meta = stack.addText(`⚡️ ${battery}%  ·  day ${days}`)
+  const meta = stack.addText(`⚡️ ${battery}% · day ${days} · ${growthStage(state)}`)
   meta.font = Font.mediumRoundedSystemFont(10)
   meta.textColor = new Color("#8FB79A")
+  meta.lineLimit = 1
+  meta.minimumScaleFactor = 0.7
 }
 
 function buildWidget(state, moodKey, family = config.widgetFamily) {
@@ -241,8 +262,10 @@ if (Device.isCharging()) state.lastFed = Date.now()
 
 function interact(action) {
   if (action === "pet") state.lastPet = Date.now()
-  if (action === "feed") state.lastSnack = Date.now()
-  if (action === "play") state.lastPlayed = Date.now()
+  else if (action === "feed") state.lastSnack = Date.now()
+  else if (action === "play") state.lastPlayed = Date.now()
+  else return
+  state.interactions = (state.interactions || 0) + 1
 }
 
 if (config.runsInWidget) {
