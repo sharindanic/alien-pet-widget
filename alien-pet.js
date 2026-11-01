@@ -31,6 +31,8 @@ const MOODS = {
   happy:    { eyes: "open",   mouth: "smile", body: "#7CE35A", glow: "#FFE066", line: "vibing 👽" },
   loved:    { eyes: "happy",  mouth: "smile", body: "#8CF06A", glow: "#FF8FAB", line: "loves you 💚", blush: true },
   eating:   { eyes: "happy",  mouth: "open",  body: "#7CE35A", glow: "#FFE066", line: "eating electrons ⚡️" },
+  playing:  { eyes: "happy",  mouth: "open",  body: "#7CE35A", glow: "#FFE066", line: "zoomies! ✨" },
+  snacking: { eyes: "happy",  mouth: "open",  body: "#7CE35A", glow: "#FFB347", line: "tasty space snack 🍪" },
   hungry:   { eyes: "open",   mouth: "open",  body: "#B9D85A", glow: "#FFB347", line: "hungry… plug me in 🔌" },
   tired:    { eyes: "droopy", mouth: "sad",   body: "#8FA98A", glow: "#6B6B6B", line: "low battery… so tired" },
   sleeping: { eyes: "closed", mouth: "flat",  body: "#4E9E68", glow: "#7A86FF", line: "zzz… 💤" },
@@ -55,6 +57,8 @@ function getMood(state) {
   if (Device.isCharging()) return "eating"
   if (hour >= 23 || hour < 6) return "sleeping"
   if (Device.batteryLevel() < 0.2) return "tired"
+  if (Date.now() - (state.lastPlayed || 0) < 30 * 60 * 1000) return "playing"
+  if (Date.now() - (state.lastSnack || 0) < 30 * 60 * 1000) return "snacking"
   if (Date.now() - state.lastPet < HOUR) return "loved"
   if (Date.now() - state.lastFed > 24 * HOUR) return "hungry"
   return "happy"
@@ -189,6 +193,8 @@ function buildWidget(state, moodKey, family = config.widgetFamily) {
   w.backgroundGradient = bg
   w.setPadding(10, 12, 10, 12)
   w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000)
+  const runUrl = URLScheme.forRunningScript()
+  w.url = runUrl + (runUrl.includes("?") ? "&" : "?") + "action=pet"
 
   const img = drawAlien(mood, state, moodKey)
   if (family === "medium") {
@@ -233,23 +239,31 @@ async function customize(state) {
 const state = loadState()
 if (Device.isCharging()) state.lastFed = Date.now()
 
+function interact(action) {
+  if (action === "pet") state.lastPet = Date.now()
+  if (action === "feed") state.lastSnack = Date.now()
+  if (action === "play") state.lastPlayed = Date.now()
+}
+
 if (config.runsInWidget) {
   saveState(state)
   Script.setWidget(buildWidget(state, getMood(state)))
 } else {
-  const menu = new Alert()
-  menu.title = `👽 ${state.name}`
-  menu.message = "What do you want to do?"
-  menu.addAction("Pet")
-  menu.addAction("Rename")
-  menu.addAction("Customize")
-  menu.addAction("Preview widget")
-  menu.addCancelAction("Close")
-  const choice = await menu.presentSheet()
+  const quickAction = args.queryParameters && args.queryParameters.action
+  let action = ["pet", "feed", "play"].includes(quickAction) ? quickAction : null
+  if (!action) {
+    const menu = new Alert()
+    menu.title = `👽 ${state.name}`
+    menu.message = "What do you want to do?"
+    for (const label of ["Pet", "Feed snack", "Play", "Rename", "Customize", "Preview widget"]) menu.addAction(label)
+    menu.addCancelAction("Close")
+    const choice = await menu.presentSheet()
+    action = ["pet", "feed", "play", "rename", "customize", "preview"][choice]
+  }
 
-  if (choice === 0) {
-    state.lastPet = Date.now()
-  } else if (choice === 1) {
+  if (["pet", "feed", "play"].includes(action)) {
+    interact(action)
+  } else if (action === "rename") {
     const ask = new Alert()
     ask.title = "Name your alien"
     ask.addTextField("Name", state.name)
@@ -260,11 +274,11 @@ if (config.runsInWidget) {
       if (name) state.name = name.slice(0, 12)
     }
   }
-  if (choice === 2) await customize(state)
+  if (action === "customize") await customize(state)
   saveState(state)
 
-  if (choice === 3) await buildWidget(state, getMood(state), "medium").presentMedium()
-  else if (choice !== -1) await buildWidget(state, getMood(state)).presentSmall()
+  if (action === "preview") await buildWidget(state, getMood(state), "medium").presentMedium()
+  else if (action) await buildWidget(state, getMood(state), "small").presentSmall()
 }
 
 Script.complete()
