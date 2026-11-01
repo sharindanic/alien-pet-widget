@@ -49,6 +49,7 @@ function skinFor(state) { return SKINS[state.skin] || SKINS.classic }
 
 function bodyColor(state, moodKey) {
   const skin = skinFor(state)
+  if (skin === SKINS.classic) return MOODS[moodKey].body
   return moodKey === "sleeping" || moodKey === "tired" ? skin.dark : skin.body
 }
 
@@ -64,7 +65,7 @@ function weatherKind(weather) {
   if (!weather) return null
   const code = weather.code
   if ([71, 73, 75, 77, 85, 86].includes(code)) return "snow"
-  if (code >= 51 && code <= 67 || code >= 80 && code <= 82 || code >= 95) return "rain"
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95) return "rain"
   if (code <= 2 && weather.isDay) return "sun"
   return "cloud"
 }
@@ -257,7 +258,7 @@ function buildWidget(state, moodKey, weather, family = config.widgetFamily) {
   const w = new ListWidget()
   const bg = new LinearGradient()
   const skin = skinFor(state)
-  bg.colors = moodKey === "sleeping" || weather && !weather.isDay
+  bg.colors = moodKey === "sleeping" || (weather && !weather.isDay)
     ? [new Color("#0B1030"), new Color("#1C1F4A")]
     : skin.background.map(color => new Color(color))
   bg.locations = [0, 1]
@@ -295,7 +296,7 @@ function buildLockWidget(state, moodKey, weather, family) {
   w.url = runUrl + (runUrl.includes("?") ? "&" : "?") + "action=pet"
   const battery = Math.round(Device.batteryLevel() * 100)
   if (family === "accessoryInline") {
-    w.addText(`👽 ${state.name} · ${battery}%`)
+    w.addText(`👽 ${state.name.slice(0, 6)} · ${battery}%`)
     return w
   }
 
