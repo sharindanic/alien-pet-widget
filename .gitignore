@@ -1,1 +1,11 @@
 .DS_Store
+
+# Local pet state and credentials must never enter the repository.
+alien-pet.json
+.env
+.env.*
+!.env.example
+*.p8
+*.p12
+*.pem
+*.mobileprovision

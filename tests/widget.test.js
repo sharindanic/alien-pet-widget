@@ -58,7 +58,7 @@ function environment(saved, { family = "small", inWidget = true, query = {}, cho
     Color: class { static white() { return new this("white") } },
     LinearGradient: class {}, ListWidget: class { constructor() { return node() } },
     Device: { isCharging: () => false, batteryLevel: () => 0.8 },
-    Location: { setAccuracyToKilometer() {}, current: async () => ({ latitude: 6.9271, longitude: 79.8612 }) },
+    Location: { setAccuracyToKilometer() {}, current: async () => ({ latitude: 12.3456, longitude: 45.6789 }) },
     URLScheme: { forRunningScript: () => "scriptable:///run/Alien%20Pet" },
     Script: { setWidget(widget) { output.widget = widget }, complete() {} },
     config: { runsInWidget: inWidget, widgetFamily: family },
@@ -100,7 +100,7 @@ test("pet action updates existing state without resetting its birthday", async (
 
 test("weather uses its cache and renders even when the network is not needed", async () => {
   const env = environment({ name: "Nova", born: Date.now(), lastFed: Date.now(), lastPet: 0,
-    weatherEnabled: true, weatherLocation: { latitude: 6.93, longitude: 79.86 },
+    weatherEnabled: true, weatherLocation: { latitude: 12.35, longitude: 45.68 },
     weather: { code: 61, isDay: true, updated: Date.now() } })
   await env.run()
   assert.equal(env.requests, 0)
@@ -111,13 +111,13 @@ test("weather is enabled from the iPhone menu and stores an approximate location
   const env = environment(null, { inWidget: false, choices: [5] })
   await env.run()
   assert.equal(env.saved.weatherEnabled, true)
-  assert.deepEqual(env.saved.weatherLocation, { latitude: 6.93, longitude: 79.86 })
+  assert.deepEqual(env.saved.weatherLocation, { latitude: 12.35, longitude: 45.68 })
   assert.equal(env.requests, 1)
 })
 
 test("turning weather off removes the saved location and weather", async () => {
   const env = environment({ name: "Nova", born: Date.now(), lastFed: Date.now(), lastPet: 0,
-    weatherEnabled: true, weatherLocation: { latitude: 6.93, longitude: 79.86 },
+    weatherEnabled: true, weatherLocation: { latitude: 12.35, longitude: 45.68 },
     weather: { code: 61, isDay: true, updated: Date.now() } }, { inWidget: false, choices: [5, 1] })
   await env.run()
   assert.equal(env.saved.weatherEnabled, false)
@@ -127,7 +127,7 @@ test("turning weather off removes the saved location and weather", async () => {
 
 test("failed weather requests do not repeat during the one hour retry window", async () => {
   const saved = { name: "Nova", born: Date.now(), lastFed: Date.now(), lastPet: 0,
-    weatherEnabled: true, weatherLocation: { latitude: 6.93, longitude: 79.86 } }
+    weatherEnabled: true, weatherLocation: { latitude: 12.35, longitude: 45.68 } }
   const first = environment(saved, { requestFails: true })
   await first.run()
   assert.equal(first.requests, 1)
