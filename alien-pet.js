@@ -60,6 +60,33 @@ function growthStage(state) {
   return "hatchling"
 }
 
+function weatherKind(weather) {
+  if (!weather) return null
+  const code = weather.code
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return "snow"
+  if (code >= 51 && code <= 67 || code >= 80 && code <= 82 || code >= 95) return "rain"
+  if (code <= 2 && weather.isDay) return "sun"
+  return "cloud"
+}
+
+async function currentWeather(state) {
+  if (!state.weatherEnabled || !state.weatherLocation) return null
+  const cached = state.weather
+  if (cached && Date.now() - cached.updated < HOUR) return cached
+  const location = state.weatherLocation
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=weather_code,is_day&forecast_days=1`
+  try {
+    const request = new Request(url)
+    request.timeoutInterval = 8
+    const response = await request.loadJSON()
+    if (!response.current || !Number.isFinite(response.current.weather_code)) throw new Error("Weather unavailable")
+    state.weather = { code: response.current.weather_code, isDay: response.current.is_day === 1, updated: Date.now() }
+    return state.weather
+  } catch (error) {
+    return cached && Date.now() - cached.updated < 3 * HOUR ? cached : null
+  }
+}
+
 function getMood(state) {
   const hour = new Date().getHours()
   if (Device.isCharging()) return "eating"
@@ -108,7 +135,7 @@ const MOUTHS = {
   flat:  ["GGGGGG", "GGDDGG"],
 }
 
-function drawAlien(mood, state, moodKey) {
+function drawAlien(mood, state, moodKey, weather) {
   const grid = BODY.map(row => row.split(""))
   const eyes = EYES[mood.eyes]
   const mouth = MOUTHS[mood.mouth]
@@ -134,6 +161,21 @@ function drawAlien(mood, state, moodKey) {
     grid[0][0] = "A"
     grid[1][1] = "A"
   }
+  const weatherType = weatherKind(weather)
+  if (weatherType === "sun" && moodKey !== "sleeping") {
+    for (const x of [4, 5, 10, 11]) grid[6][x] = "K"
+    for (const x of [4, 5, 10, 11]) grid[7][x] = "K"
+    for (const x of [6, 7, 8, 9]) grid[6][x] = "D"
+  } else if (weatherType === "rain") {
+    for (let x = 0; x <= 5; x++) grid[0][x] = "U"
+    grid[1][2] = "D"
+    grid[2][2] = "D"
+    grid[3][2] = "D"
+  } else if (weatherType === "snow") {
+    grid[3][0] = "W"
+    grid[7][15] = "W"
+    grid[11][0] = "W"
+  }
   if (state.accessory === "crown") {
     for (const [x, y] of [[6, 1], [8, 0], [10, 1], [6, 2], [7, 2], [8, 2], [9, 2], [10, 2]]) grid[y][x] = "T"
   } else if (state.accessory === "bow") {
@@ -142,7 +184,7 @@ function drawAlien(mood, state, moodKey) {
 
   const palette = {
     D: "#173B22", G: bodyColor(state, moodKey), A: mood.glow,
-    W: "#FFFFFF", K: "#101010", R: "#E8505B", P: "#FF8FAB", T: "#FFE066", X: "#FFF3B0",
+    W: "#FFFFFF", K: "#101010", R: "#E8505B", P: "#FF8FAB", T: "#FFE066", X: "#FFF3B0", U: "#B28DFF",
   }
   const ctx = new DrawContext()
   ctx.size = new Size(16 * SCALE, BODY.length * SCALE)
@@ -176,7 +218,7 @@ function drawEnergyBar(level, color) {
 
 // ---------- widget ----------
 
-function addInfo(stack, state, mood, moodKey) {
+function addInfo(stack, state, mood, moodKey, weather) {
   const battery = Math.round(Device.batteryLevel() * 100)
   const days = Math.floor((Date.now() - state.born) / (24 * HOUR)) + 1
 
@@ -184,7 +226,8 @@ function addInfo(stack, state, mood, moodKey) {
   name.font = Font.boldRoundedSystemFont(14)
   name.textColor = Color.white()
 
-  const line = stack.addText(mood.line)
+  const weatherIcon = { sun: "☀️", rain: "☔️", snow: "❄️", cloud: "☁️" }[weatherKind(weather)] || ""
+  const line = stack.addText(`${mood.line} ${weatherIcon}`.trim())
   line.font = Font.regularRoundedSystemFont(11)
   line.textColor = new Color("#CFE8D2")
   line.lineLimit = 1
@@ -202,12 +245,12 @@ function addInfo(stack, state, mood, moodKey) {
   meta.minimumScaleFactor = 0.7
 }
 
-function buildWidget(state, moodKey, family = config.widgetFamily) {
+function buildWidget(state, moodKey, weather, family = config.widgetFamily) {
   const mood = MOODS[moodKey]
   const w = new ListWidget()
   const bg = new LinearGradient()
   const skin = skinFor(state)
-  bg.colors = moodKey === "sleeping"
+  bg.colors = moodKey === "sleeping" || weather && !weather.isDay
     ? [new Color("#0B1030"), new Color("#1C1F4A")]
     : skin.background.map(color => new Color(color))
   bg.locations = [0, 1]
@@ -217,7 +260,7 @@ function buildWidget(state, moodKey, family = config.widgetFamily) {
   const runUrl = URLScheme.forRunningScript()
   w.url = runUrl + (runUrl.includes("?") ? "&" : "?") + "action=pet"
 
-  const img = drawAlien(mood, state, moodKey)
+  const img = drawAlien(mood, state, moodKey, weather)
   if (family === "medium") {
     const row = w.addStack()
     row.centerAlignContent()
@@ -225,16 +268,50 @@ function buildWidget(state, moodKey, family = config.widgetFamily) {
     row.addSpacer(14)
     const col = row.addStack()
     col.layoutVertically()
-    addInfo(col, state, mood, moodKey)
+    addInfo(col, state, mood, moodKey, weather)
   } else {
     const top = w.addStack()
     top.addSpacer()
     top.addImage(img).imageSize = new Size(72, 63)
     top.addSpacer()
     w.addSpacer(4)
-    addInfo(w, state, mood, moodKey)
+    addInfo(w, state, mood, moodKey, weather)
   }
   return w
+}
+
+async function configureWeather(state) {
+  if (state.weatherEnabled) {
+    const prompt = new Alert()
+    prompt.title = "Weather is on"
+    prompt.addAction("Update location")
+    prompt.addDestructiveAction("Turn off weather")
+    prompt.addCancelAction("Back")
+    const choice = await prompt.presentSheet()
+    if (choice === 1) {
+      state.weatherEnabled = false
+      delete state.weatherLocation
+      delete state.weather
+      return
+    }
+    if (choice !== 0) return
+  }
+  try {
+    Location.setAccuracyToKilometer()
+    const location = await Location.current()
+    state.weatherLocation = {
+      latitude: Math.round(location.latitude * 100) / 100,
+      longitude: Math.round(location.longitude * 100) / 100,
+    }
+    state.weatherEnabled = true
+    delete state.weather
+  } catch (error) {
+    const alert = new Alert()
+    alert.title = "Location unavailable"
+    alert.message = "Allow location for Scriptable in iPhone Settings, then try again."
+    alert.addAction("OK")
+    await alert.present()
+  }
 }
 
 async function customize(state) {
@@ -269,8 +346,9 @@ function interact(action) {
 }
 
 if (config.runsInWidget) {
+  const weather = await currentWeather(state)
   saveState(state)
-  Script.setWidget(buildWidget(state, getMood(state)))
+  Script.setWidget(buildWidget(state, getMood(state), weather))
 } else {
   const quickAction = args.queryParameters && args.queryParameters.action
   let action = ["pet", "feed", "play"].includes(quickAction) ? quickAction : null
@@ -278,10 +356,10 @@ if (config.runsInWidget) {
     const menu = new Alert()
     menu.title = `👽 ${state.name}`
     menu.message = "What do you want to do?"
-    for (const label of ["Pet", "Feed snack", "Play", "Rename", "Customize", "Preview widget"]) menu.addAction(label)
+    for (const label of ["Pet", "Feed snack", "Play", "Rename", "Customize", "Weather", "Preview widget"]) menu.addAction(label)
     menu.addCancelAction("Close")
     const choice = await menu.presentSheet()
-    action = ["pet", "feed", "play", "rename", "customize", "preview"][choice]
+    action = ["pet", "feed", "play", "rename", "customize", "weather", "preview"][choice]
   }
 
   if (["pet", "feed", "play"].includes(action)) {
@@ -298,10 +376,12 @@ if (config.runsInWidget) {
     }
   }
   if (action === "customize") await customize(state)
+  if (action === "weather") await configureWeather(state)
+  const weather = await currentWeather(state)
   saveState(state)
 
-  if (action === "preview") await buildWidget(state, getMood(state), "medium").presentMedium()
-  else if (action) await buildWidget(state, getMood(state), "small").presentSmall()
+  if (action === "preview") await buildWidget(state, getMood(state), weather, "medium").presentMedium()
+  else if (action) await buildWidget(state, getMood(state), weather, "small").presentSmall()
 }
 
 Script.complete()
