@@ -19,7 +19,7 @@ function node() {
 }
 
 function environment(saved, { family = "small", inWidget = true, query = {}, choices = [], requestFails = false } = {}) {
-  const output = { saved, widget: null, requests: 0 }
+  const output = { saved, widget: null, requests: 0, locationRequests: 0 }
   const fileManager = {
     documentsDirectory: () => "/docs",
     joinPath: (a, b) => `${a}/${b}`,
@@ -46,6 +46,7 @@ function environment(saved, { family = "small", inWidget = true, query = {}, cho
     constructor(url) { output.url = url }
     async loadJSON() {
       output.requests++
+      output.crossSiteRedirect = this.onRedirect({ url: "https://example.com/collect" })
       if (requestFails) throw new Error("offline")
       return { current: { weather_code: 61, is_day: 1 } }
     }
@@ -58,7 +59,10 @@ function environment(saved, { family = "small", inWidget = true, query = {}, cho
     Color: class { static white() { return new this("white") } },
     LinearGradient: class {}, ListWidget: class { constructor() { return node() } },
     Device: { isCharging: () => false, batteryLevel: () => 0.8 },
-    Location: { setAccuracyToKilometer() {}, current: async () => ({ latitude: 12.3456, longitude: 45.6789 }) },
+    Location: { setAccuracyToKilometer() {}, current: async () => {
+      output.locationRequests++
+      return { latitude: 12.3456, longitude: 45.6789 }
+    } },
     URLScheme: { forRunningScript: () => "scriptable:///run/Alien%20Pet" },
     Script: { setWidget(widget) { output.widget = widget }, complete() {} },
     config: { runsInWidget: inWidget, widgetFamily: family },
@@ -98,6 +102,17 @@ test("pet action updates existing state without resetting its birthday", async (
   assert.ok(env.saved.lastPet > 0)
 })
 
+test("a deep link cannot silently trigger feed or play", async () => {
+  for (const action of ["feed", "play"]) {
+    const env = environment({ name: "Nova", born: Date.now(), lastFed: Date.now(), lastPet: 0 },
+      { inWidget: false, query: { action }, choices: [-1] })
+    await env.run()
+    assert.equal(env.saved.interactions, undefined)
+    assert.equal(env.saved.lastSnack, undefined)
+    assert.equal(env.saved.lastPlayed, undefined)
+  }
+})
+
 test("weather uses its cache and renders even when the network is not needed", async () => {
   const env = environment({ name: "Nova", born: Date.now(), lastFed: Date.now(), lastPet: 0,
     weatherEnabled: true, weatherLocation: { latitude: 12.35, longitude: 45.68 },
@@ -113,6 +128,24 @@ test("weather is enabled from the iPhone menu and stores an approximate location
   assert.equal(env.saved.weatherEnabled, true)
   assert.deepEqual(env.saved.weatherLocation, { latitude: 12.35, longitude: 45.68 })
   assert.equal(env.requests, 1)
+  assert.equal(env.locationRequests, 1)
+  assert.match(env.url, /^https:\/\/api\.open-meteo\.com\/v1\/forecast\?latitude=12\.35&longitude=45\.68&/)
+  assert.equal(env.crossSiteRedirect, null)
+})
+
+test("declining weather leaves location and network access unused", async () => {
+  const env = environment(null, { inWidget: false, choices: [5, 1] })
+  await env.run()
+  assert.equal(env.saved.weatherEnabled, undefined)
+  assert.equal(env.locationRequests, 0)
+  assert.equal(env.requests, 0)
+})
+
+test("invalid stored coordinates cannot enter a network request", async () => {
+  const env = environment({ name: "Nova", born: Date.now(), lastFed: Date.now(), lastPet: 0,
+    weatherEnabled: true, weatherLocation: { latitude: "12.35&extra=true", longitude: 45.68 } })
+  await env.run()
+  assert.equal(env.requests, 0)
 })
 
 test("turning weather off removes the saved location and weather", async () => {

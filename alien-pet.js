@@ -70,8 +70,16 @@ function weatherKind(weather) {
   return "cloud"
 }
 
+function validWeatherLocation(location) {
+  return location &&
+    typeof location.latitude === "number" && Number.isFinite(location.latitude) &&
+    typeof location.longitude === "number" && Number.isFinite(location.longitude) &&
+    location.latitude >= -90 && location.latitude <= 90 &&
+    location.longitude >= -180 && location.longitude <= 180
+}
+
 async function currentWeather(state) {
-  if (!state.weatherEnabled || !state.weatherLocation) return null
+  if (!state.weatherEnabled || !validWeatherLocation(state.weatherLocation)) return null
   const cached = state.weather
   if (cached && Date.now() - cached.updated < HOUR) return cached
   if (state.weatherAttempted && Date.now() - state.weatherAttempted < HOUR) {
@@ -79,10 +87,13 @@ async function currentWeather(state) {
   }
   state.weatherAttempted = Date.now()
   const location = state.weatherLocation
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=weather_code,is_day&forecast_days=1`
+  const latitude = Math.round(location.latitude * 100) / 100
+  const longitude = Math.round(location.longitude * 100) / 100
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=weather_code,is_day&forecast_days=1`
   try {
     const request = new Request(url)
     request.timeoutInterval = 8
+    request.onRedirect = redirected => redirected.url.startsWith("https://api.open-meteo.com/") ? redirected : null
     const response = await request.loadJSON()
     if (!response.current || !Number.isFinite(response.current.weather_code)) throw new Error("Weather unavailable")
     state.weather = { code: response.current.weather_code, isDay: response.current.is_day === 1, updated: Date.now() }
@@ -362,10 +373,18 @@ async function configureWeather(state) {
       return
     }
     if (choice !== 0) return
+  } else {
+    const disclosure = new Alert()
+    disclosure.title = "Enable weather?"
+    disclosure.message = "Scriptable will ask for your location. The alien saves approximate coordinates and sends them to Open-Meteo for weather. Open-Meteo may keep request logs for up to 90 days. You can turn this off and delete the saved location later."
+    disclosure.addAction("Enable weather")
+    disclosure.addCancelAction("Keep off")
+    if (await disclosure.present() !== 0) return
   }
   try {
     Location.setAccuracyToKilometer()
     const location = await Location.current()
+    if (!validWeatherLocation(location)) throw new Error("Invalid location")
     state.weatherLocation = {
       latitude: Math.round(location.latitude * 100) / 100,
       longitude: Math.round(location.longitude * 100) / 100,
@@ -419,7 +438,8 @@ if (config.runsInWidget) {
   Script.setWidget(buildWidget(state, getMood(state), weather))
 } else {
   const quickAction = args.queryParameters && args.queryParameters.action
-  let action = ["pet", "feed", "play"].includes(quickAction) ? quickAction : null
+  // Only widget petting can run without opening the in-app menu.
+  let action = quickAction === "pet" ? "pet" : null
   if (!action) {
     const menu = new Alert()
     menu.title = `👽 ${state.name}`
