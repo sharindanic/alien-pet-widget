@@ -5,24 +5,107 @@
 const DEFAULT_NAME = "Blip"
 const SCALE = 8 // screen points per sprite pixel
 const HOUR = 60 * 60 * 1000
+const DAY = 24 * HOUR
+const VERSION = "2.0.0"
 
 // ---------- state ----------
 
 const fm = FileManager.local()
-const statePath = fm.joinPath(fm.documentsDirectory(), "alien-pet.json")
+const legacyPath = fm.joinPath(fm.documentsDirectory(), "alien-pet.json")
+const statePath = fm.joinPath(fm.documentsDirectory(), "alien-pets.json")
 
-function loadState() {
-  if (fm.fileExists(statePath)) {
-    try {
-      return JSON.parse(fm.readString(statePath))
-    } catch (e) {}
-  }
+function newPet(name = DEFAULT_NAME, id = "blip") {
   const now = Date.now()
-  return { name: DEFAULT_NAME, born: now, lastFed: now, lastPet: 0 }
+  return { id, name, born: now, lastFed: now, lastPet: 0, interactions: 0, journal: [], missionDays: [], streakDays: [] }
 }
 
-function saveState(state) {
-  fm.writeString(statePath, JSON.stringify(state))
+function readJSON(path) {
+  if (!fm.fileExists(path)) return null
+  try { return JSON.parse(fm.readString(path)) } catch (error) { return null }
+}
+
+function loadCollection() {
+  const saved = readJSON(statePath)
+  if (saved && Array.isArray(saved.pets) && saved.pets.length) {
+    const pets = saved.pets.filter(pet => pet && /^[a-z0-9-]{1,40}$/.test(pet.id) && typeof pet.name === "string")
+    if (pets.length) return { version: 2, activeId: saved.activeId, pets }
+  }
+  // Keep the original file untouched as a recoverable copy during migration.
+  const legacy = readJSON(legacyPath)
+  const pet = legacy && typeof legacy === "object" && typeof legacy.name === "string"
+    ? { ...newPet(), ...legacy, id: "blip" } : newPet()
+  return { version: 2, activeId: "blip", pets: [pet] }
+}
+
+function saveCollection(collection) {
+  fm.writeString(statePath, JSON.stringify(collection))
+}
+
+function petById(collection, id) {
+  return collection.pets.find(pet => pet.id === id) || collection.pets.find(pet => pet.id === collection.activeId) || collection.pets[0]
+}
+
+function uniquePetId(collection, name) {
+  const base = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "pet"
+  let id = base
+  for (let number = 2; collection.pets.some(pet => pet.id === id); number++) id = `${base}-${number}`
+  return id
+}
+
+function dayKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+}
+
+const MISSIONS = ["pet", "feed", "play"]
+function missionFor(state) {
+  const today = dayKey()
+  const day = Math.floor(new Date(`${today}T12:00:00`).getTime() / DAY)
+  const mission = MISSIONS[(day + state.id.length) % MISSIONS.length]
+  return { action: mission, label: { pet: "Pet your alien", feed: "Feed a snack", play: "Play together" }[mission], done: (state.missionDays || []).includes(today) }
+}
+
+function careStats(state) {
+  const age = Math.max(0, Date.now() - (state.lastSnack || state.born))
+  const fullness = Math.max(20, Math.round(100 - age / HOUR * 3))
+  const affection = Math.max(20, Math.round(100 - Math.max(0, Date.now() - (state.lastPet || state.born)) / HOUR * 2))
+  return { fullness, affection, energy: Math.round(Device.batteryLevel() * 100) }
+}
+
+function streak(state) {
+  const days = new Set(state.streakDays || [])
+  const cursor = new Date()
+  if (!days.has(dayKey(cursor))) cursor.setDate(cursor.getDate() - 1)
+  let count = 0
+  while (days.has(dayKey(cursor))) {
+    count++
+    cursor.setDate(cursor.getDate() - 1)
+  }
+  return count
+}
+
+function recordInteraction(state, action) {
+  const now = Date.now()
+  if (action === "pet") state.lastPet = now
+  else if (action === "feed") { state.lastSnack = now; state.lastFed = now }
+  else if (action === "play") state.lastPlayed = now
+  else return
+  state.interactions = (state.interactions || 0) + 1
+  const today = dayKey()
+  state.streakDays = [...new Set([...(state.streakDays || []), today])].slice(-45)
+  const mission = missionFor(state)
+  const completed = mission.action === action && !mission.done
+  if (completed) state.missionDays = [...new Set([...(state.missionDays || []), today])].slice(-90)
+  const surprise = completed && (state.missionDays.length % 3 === 0) ? "Found a tiny moon rock!" : null
+  state.journal = [...(state.journal || []), { at: now, action, mission: completed, surprise }].slice(-20)
+}
+
+function achievements(state) {
+  const badges = []
+  if ((state.interactions || 0) >= 10) badges.push("First friend")
+  if (streak(state) >= 3) badges.push("3-day streak")
+  if ((state.missionDays || []).length >= 7) badges.push("Mission master")
+  if (growthStage(state) === "captain") badges.push("Captain")
+  return badges
 }
 
 // ---------- mood ----------
@@ -43,7 +126,7 @@ const SKINS = {
   pink: { name: "Nebula pink", body: "#F48DC4", dark: "#A96591", background: ["#271327", "#482344"] },
   blue: { name: "Moon blue", body: "#76C8F5", dark: "#527DAA", background: ["#101D32", "#1A3856"] },
 }
-const ACCESSORIES = { none: "None", crown: "Crown", bow: "Bow" }
+const ACCESSORIES = { none: "None", crown: "Crown", bow: "Bow", star: "Star (3 missions)" }
 
 function skinFor(state) { return SKINS[state.skin] || SKINS.classic }
 
@@ -196,6 +279,8 @@ function drawAlien(mood, state, moodKey, weather) {
     for (const [x, y] of [[6, 1], [8, 0], [10, 1], [6, 2], [7, 2], [8, 2], [9, 2], [10, 2]]) grid[y][x] = "T"
   } else if (state.accessory === "bow") {
     for (const [x, y] of [[1, 3], [2, 4], [1, 5], [3, 4], [5, 3], [4, 4], [5, 5]]) grid[y][x] = "T"
+  } else if (state.accessory === "star") {
+    for (const [x, y] of [[8, 0], [7, 1], [8, 1], [9, 1], [8, 2], [2, 2]]) grid[y][x] = "T"
   }
 
   const palette = {
@@ -267,6 +352,63 @@ function addInfo(stack, state, mood, moodKey, weather) {
   updated.textColor = new Color("#70957B")
 }
 
+function addCareLine(stack, state, size = 10) {
+  const care = careStats(state)
+  const mission = missionFor(state)
+  const line = stack.addText(`💚 ${care.affection}%  🍪 ${care.fullness}%  ⚡ ${care.energy}%`)
+  line.font = Font.mediumRoundedSystemFont(size)
+  line.textColor = new Color("#CFE8D2")
+  line.lineLimit = 1
+  line.minimumScaleFactor = 0.65
+  const task = stack.addText(`${mission.done ? "✓" : "○"} ${mission.label} · 🔥 ${streak(state)}`)
+  task.font = Font.regularRoundedSystemFont(size)
+  task.textColor = new Color("#CFE8D2")
+  task.lineLimit = 1
+  task.minimumScaleFactor = 0.65
+}
+
+function addHabitat(widget, state, moodKey, weather) {
+  const heading = widget.addText(`✦ ${state.name}'s little universe`)
+  heading.font = Font.boldRoundedSystemFont(16)
+  heading.textColor = Color.white()
+  widget.addSpacer(8)
+  const scene = widget.addStack()
+  scene.centerAlignContent()
+  scene.addSpacer()
+  scene.addImage(drawAlien(MOODS[moodKey], state, moodKey, weather)).imageSize = new Size(144, 126)
+  scene.addSpacer()
+  widget.addSpacer(8)
+  const status = widget.addText(`${MOODS[moodKey].line} · day ${Math.floor((Date.now() - state.born) / DAY) + 1} · ${growthStage(state)}`)
+  status.font = Font.mediumRoundedSystemFont(12)
+  status.textColor = new Color("#CFE8D2")
+  addCareLine(widget, state, 11)
+  const progress = growthStage(state) === "captain" ? "Captain unlocked!" :
+    growthStage(state) === "explorer" ? `${state.interactions || 0}/50 interactions toward Captain` :
+      `${state.interactions || 0}/10 interactions toward Explorer`
+  const growth = widget.addText(progress)
+  growth.font = Font.regularRoundedSystemFont(10)
+  growth.textColor = new Color("#8FB79A")
+  const badges = achievements(state)
+  if (badges.length) {
+    const badgeLine = widget.addText(`🏅 ${badges.join(" · ")}`)
+    badgeLine.font = Font.regularRoundedSystemFont(10)
+    badgeLine.textColor = new Color("#FFE066")
+    badgeLine.lineLimit = 1
+    badgeLine.minimumScaleFactor = 0.7
+  }
+  const latest = (state.journal || []).slice(-1)[0]
+  if (latest) {
+    const history = widget.addText(latest.surprise || `Last care: ${latest.action}${latest.mission ? " · mission complete!" : ""}`)
+    history.font = Font.regularRoundedSystemFont(10)
+    history.textColor = new Color("#8FB79A")
+  }
+}
+
+function petURL(state) {
+  const runUrl = URLScheme.forRunningScript()
+  return runUrl + (runUrl.includes("?") ? "&" : "?") + `action=pet&pet=${encodeURIComponent(state.id)}`
+}
+
 function buildWidget(state, moodKey, weather, family = config.widgetFamily) {
   if (family && family.startsWith("accessory")) return buildLockWidget(state, moodKey, weather, family)
   const mood = MOODS[moodKey]
@@ -280,11 +422,12 @@ function buildWidget(state, moodKey, weather, family = config.widgetFamily) {
   w.backgroundGradient = bg
   w.setPadding(10, 12, 10, 12)
   w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000)
-  const runUrl = URLScheme.forRunningScript()
-  w.url = runUrl + (runUrl.includes("?") ? "&" : "?") + "action=pet"
+  w.url = petURL(state)
 
   const img = drawAlien(mood, state, moodKey, weather)
-  if (family === "medium") {
+  if (family === "large") {
+    addHabitat(w, state, moodKey, weather)
+  } else if (family === "medium") {
     const row = w.addStack()
     row.centerAlignContent()
     row.addImage(img).imageSize = new Size(110, 96)
@@ -307,11 +450,10 @@ function buildLockWidget(state, moodKey, weather, family) {
   const w = new ListWidget()
   w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000)
   w.addAccessoryWidgetBackground = family !== "accessoryInline"
-  const runUrl = URLScheme.forRunningScript()
-  w.url = runUrl + (runUrl.includes("?") ? "&" : "?") + "action=pet"
+  w.url = petURL(state)
   const battery = Math.round(Device.batteryLevel() * 100)
   if (family === "accessoryInline") {
-    w.addText(`👽 ${state.name.slice(0, 6)} · ${battery}%`)
+    w.addText(`👽 ${state.name.slice(0, 6)} · 🔥${streak(state)} · ${battery}%`)
     return w
   }
 
@@ -334,7 +476,8 @@ function buildLockWidget(state, moodKey, weather, family) {
     details.layoutVertically()
     const name = details.addText(state.name)
     name.font = Font.boldRoundedSystemFont(12)
-    const level = details.addText(`⚡ ${battery}% · ${moodKey}`)
+    const mission = missionFor(state)
+    const level = details.addText(`${mission.done ? "✓" : "○"} ${mission.label} · 🔥${streak(state)}`)
     level.font = Font.regularRoundedSystemFont(9)
     level.lineLimit = 1
     level.minimumScaleFactor = 0.7
@@ -345,13 +488,15 @@ function buildLockWidget(state, moodKey, weather, family) {
 async function previewWidget(state, weather) {
   const picker = new Alert()
   picker.title = "Preview widget"
-  for (const label of ["Home Screen", "Lock Screen circle", "Lock Screen rectangle", "Lock Screen inline"]) picker.addAction(label)
+  for (const label of ["Home Screen small", "Home Screen medium", "Home Screen large habitat", "Lock Screen circle", "Lock Screen rectangle", "Lock Screen inline"]) picker.addAction(label)
   picker.addCancelAction("Back")
   const choice = await picker.presentSheet()
-  const family = ["medium", "accessoryCircular", "accessoryRectangular", "accessoryInline"][choice]
+  const family = ["small", "medium", "large", "accessoryCircular", "accessoryRectangular", "accessoryInline"][choice]
   if (!family) return
   const widget = buildWidget(state, getMood(state), weather, family)
-  if (family === "medium") await widget.presentMedium()
+  if (family === "small") await widget.presentSmall()
+  else if (family === "medium") await widget.presentMedium()
+  else if (family === "large") await widget.presentLarge()
   else if (family === "accessoryCircular") await widget.presentAccessoryCircular()
   else if (family === "accessoryRectangular") await widget.presentAccessoryRectangular()
   else await widget.presentAccessoryInline()
@@ -412,29 +557,71 @@ async function customize(state) {
   const picker = new Alert()
   picker.title = choice === 0 ? "Alien color" : "Accessory"
   const options = choice === 0 ? SKINS : ACCESSORIES
-  const keys = Object.keys(options)
+  const keys = Object.keys(options).filter(key => choice === 0 || key !== "star" || (state.missionDays || []).length >= 3)
   for (const key of keys) picker.addAction(choice === 0 ? options[key].name : options[key])
   picker.addCancelAction("Cancel")
   const selected = await picker.presentSheet()
   if (selected >= 0) state[choice === 0 ? "skin" : "accessory"] = keys[selected]
 }
 
+async function managePets(collection) {
+  const menu = new Alert()
+  menu.title = "Your aliens"
+  for (const pet of collection.pets) menu.addAction(`${pet.id === collection.activeId ? "✓ " : ""}${pet.name} · ${pet.id}`)
+  menu.addAction("Adopt a new alien")
+  menu.addCancelAction("Back")
+  const choice = await menu.presentSheet()
+  if (choice < 0) return
+  if (choice < collection.pets.length) {
+    collection.activeId = collection.pets[choice].id
+    return
+  }
+  const ask = new Alert()
+  ask.title = "Name your new alien"
+  ask.addTextField("Name", "Nova")
+  ask.addAction("Adopt")
+  ask.addCancelAction("Cancel")
+  if (await ask.present() !== 0) return
+  const name = ask.textFieldValue(0).trim().slice(0, 12)
+  if (!name) return
+  const pet = newPet(name, uniquePetId(collection, name))
+  collection.pets.push(pet)
+  collection.activeId = pet.id
+}
+
+async function showJournal(state) {
+  const alert = new Alert()
+  alert.title = `${state.name}'s care journal`
+  const entries = (state.journal || []).slice(-8).reverse().map(entry =>
+    `${dayKey(new Date(entry.at))}: ${entry.action}${entry.mission ? " ✓ mission" : ""}${entry.surprise ? ` · ${entry.surprise}` : ""}`)
+  alert.message = [
+    `Streak: ${streak(state)} day(s) · missions: ${(state.missionDays || []).length}`,
+    `Badges: ${achievements(state).join(", ") || "none yet"}`,
+    ...entries,
+  ].join("\n")
+  alert.addAction("OK")
+  await alert.present()
+}
+
+async function showTips(collection) {
+  const alert = new Alert()
+  alert.title = `Alien Pet ${VERSION}`
+  alert.message = `For a specific Lock Screen pet, edit the Scriptable widget and enter its ID in Parameter: ${collection.pets.map(pet => `${pet.name} = ${pet.id}`).join(", ")}. The rectangular widget shows today's mission; tap it to pet. Feed and Play are in this menu. iOS chooses when widgets refresh.`
+  alert.addAction("OK")
+  await alert.present()
+}
+
 // ---------- main ----------
 
-const state = loadState()
+const collection = loadCollection()
+const requestedId = config.runsInWidget ? (args.widgetParameter || "").trim() :
+  args.queryParameters && args.queryParameters.action === "pet" ? args.queryParameters.pet : null
+let state = petById(collection, requestedId)
 if (Device.isCharging()) state.lastFed = Date.now()
-
-function interact(action) {
-  if (action === "pet") state.lastPet = Date.now()
-  else if (action === "feed") state.lastSnack = Date.now()
-  else if (action === "play") state.lastPlayed = Date.now()
-  else return
-  state.interactions = (state.interactions || 0) + 1
-}
 
 if (config.runsInWidget) {
   const weather = await currentWeather(state)
-  saveState(state)
+  saveCollection(collection)
   Script.setWidget(buildWidget(state, getMood(state), weather))
 } else {
   const quickAction = args.queryParameters && args.queryParameters.action
@@ -444,14 +631,14 @@ if (config.runsInWidget) {
     const menu = new Alert()
     menu.title = `👽 ${state.name}`
     menu.message = "What do you want to do?"
-    for (const label of ["Pet", "Feed snack", "Play", "Rename", "Customize", "Weather", "Preview widget"]) menu.addAction(label)
+    for (const label of ["Pet", "Feed snack", "Play", "Rename", "Customize", "Weather", "Preview widget", "Your aliens", "Care journal", "Widget tips"]) menu.addAction(label)
     menu.addCancelAction("Close")
     const choice = await menu.presentSheet()
-    action = ["pet", "feed", "play", "rename", "customize", "weather", "preview"][choice]
+    action = ["pet", "feed", "play", "rename", "customize", "weather", "preview", "pets", "journal", "tips"][choice]
   }
 
   if (["pet", "feed", "play"].includes(action)) {
-    interact(action)
+    recordInteraction(state, action)
   } else if (action === "rename") {
     const ask = new Alert()
     ask.title = "Name your alien"
@@ -465,11 +652,15 @@ if (config.runsInWidget) {
   }
   if (action === "customize") await customize(state)
   if (action === "weather") await configureWeather(state)
+  if (action === "pets") { await managePets(collection); state = petById(collection, collection.activeId) }
+  if (action === "journal") await showJournal(state)
+  if (action === "tips") await showTips(collection)
   const weather = await currentWeather(state)
-  saveState(state)
+  saveCollection(collection)
 
   if (action === "preview") await previewWidget(state, weather)
-  else if (action) await buildWidget(state, getMood(state), weather, "small").presentSmall()
+  else if (["pet", "feed", "play", "rename", "customize", "weather", "pets"].includes(action))
+    await buildWidget(state, getMood(state), weather, "small").presentSmall()
 }
 
 Script.complete()

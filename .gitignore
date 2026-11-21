@@ -2,6 +2,7 @@
 
 # Local pet state and credentials must never enter the repository.
 alien-pet.json
+alien-pets.json
 .env
 .env.*
 !.env.example
